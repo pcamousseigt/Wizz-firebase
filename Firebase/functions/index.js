@@ -8,9 +8,6 @@ initializeApp();
 
 const db = getFirestore();
 
-// Create and Deploy Your First Cloud Functions
-// https://firebase.google.com/docs/functions/write-firebase-functions
-
 /* ===== Constants ===== */
 
 const COLLECTION_NAME_USERS = "users";
@@ -53,45 +50,75 @@ exports.deleteUser = functions.auth.user()
 
 /* ===== Functions onCall ===== */
 
-exports.helloWorld = functions
+exports.getFriends = functions
     .https.onCall((data, context) => {
-      // context.app will be undefined if the request doesn't include an
-      // App Check token. (If the request includes an invalid App Check
-      // token, the request will be rejected with HTTP error 401.)
-      if (context.app == undefined) {
-        // You can inspect the raw request header to check whether an App
-        // Check token was provided in the request. If you're not ready to
-        // fully enable App Check yet, you could log these conditions instead
-        // of throwing errors.
-        const rawToken = context.rawRequest.header["X-Firebase-AppCheck"];
-        if (rawToken == undefined) {
-          /*  throw new functions.https.HttpsError(
-              "failed-precondition",
-              "The function must be called from an App Check verified app."
-          );*/
-        } else {
-          throw new functions.https.HttpsError(
-              "unauthenticated",
-              "Provided App Check token failed to validate.",
-          );
-        }
-      }
+      securityChecks(context);
+      authChecks(context);
 
-      functions.logger.info("Hello logs!", {structuredData: true});
-      return {response: "Hello from Firebase!"};
+      const userUid = context.auth.uid;
+
+      return getFriends(userUid);
     });
 
 /* ===== Private functions ===== */
 
 /**
- * Deletes user friendships
- * @param {userUid} userUid The user whose friendships should be deleted.
+ * Gets the friendships of a user
+ * @param {String} userUid The user whose friendships are requested
+ * @return {*} The friendships
+ */
+async function getFriends(userUid) {
+  return db
+      .collection(COLLECTION_NAME_FRIENDS)
+      .where("userIds", "array-contains", userUid)
+      .get()
+      .then(
+          (snapshot) => {
+            // Convert the snapshot query into requested values
+            const values = getValuesFromSnapshot(snapshot);
+            // The response must not contains current user id
+            const friendIds = values.filter((userId) => userId != userUid);
+
+            return {response: friendIds};
+          })
+      .catch(
+          (error) => {
+            console.log("Error trying to get friendships.");
+            return {response: []};
+          },
+      );
+}
+
+/**
+ * Transforms a snapshot response into an array
+ * @param {QuerySnapshot} snapshot The docs in snapshots
+ * @return {Array} The array of data from the snapshots
+ */
+function getValuesFromSnapshot(snapshot) {
+  const values = [];
+
+  if (snapshot.empty) {
+    console.log("No matching documents.");
+    return {response: values};
+  }
+
+  snapshot.docs.forEach((doc) => {
+    const fields = doc.data();
+    const arrayOfUserIds = fields["userIds"];
+    arrayOfUserIds.forEach((userIds) => {
+      values.push(userIds);
+    });
+  });
+  return values;
+}
+
+/**
+ * Deletes all user friendships
+ * @param {String} userUid The user whose friendships should be deleted.
  * @return {*} The response if the user friendships have been deleted
  * or throws an exception
  */
 async function deleteUserFriendships(userUid) {
-  // deletes all friendships of the user
-
   const friendsDocsRef = db
       .collection(COLLECTION_NAME_FRIENDS)
       .where("userIds", "array-contains", userUid);
@@ -112,7 +139,7 @@ async function deleteUserFriendships(userUid) {
 
 /**
  * Deletes the user
- * @param {userUid} userUid The user to delete.
+ * @param {String} userUid The user to delete.
  * @return {*} The response if the user has been deleted or throws an exception
  */
 async function deleteUser(userUid) {
@@ -178,4 +205,52 @@ async function deleteQueryBatch(db, query, resolve) {
   process.nextTick(() => {
     deleteQueryBatch(db, query, resolve);
   });
+}
+
+/**
+ * Checks all the security concerns of the request
+ * @param {context} context The context of the request
+ */
+function securityChecks(context) {
+  // context.app will be undefined if the request doesn't include an
+  // App Check token. If the request includes an invalid App Check
+  // token, the request will be rejected with HTTP error 401.
+  if (context.app == undefined) {
+    // You can inspect the raw request header to check whether an App
+    // Check token was provided in the request.
+    const rawToken = context.rawRequest.header["X-Firebase-AppCheck"];
+    if (rawToken == undefined) {
+      /*  throw new functions.https.HttpsError(
+          "failed-precondition",
+          "The function must be called from an App Check verified app."
+      );*/
+    } else {
+      throw new functions.https.HttpsError(
+          "unauthenticated",
+          "Provided App Check token failed to validate.",
+      );
+    }
+  }
+}
+
+/**
+ * Checks all the auth concerns of the request
+ * @param {context} context The context of the request
+ */
+function authChecks(context) {
+  // Checking that the user is authenticated.
+  if (!context.auth) {
+    // Throwing an HttpsError so that the client gets the error details.
+    throw new functions.https.HttpsError(
+        "failed-precondition",
+        "The function must be called while authenticated.",
+    );
+  }
+
+  if (!context.auth.uid) {
+    throw new functions.https.HttpsError(
+        "unauthenticated",
+        "The server failed to find user id.",
+    );
+  }
 }
