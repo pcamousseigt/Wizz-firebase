@@ -68,6 +68,7 @@ exports.getFriends = functions
  * @return {*} The friendships
  */
 async function getFriends(userUid) {
+  functions.logger.log("userUid:", userUid);
   return db
       .collection(COLLECTION_NAME_FRIENDS)
       .where("userIds", "array-contains", userUid)
@@ -75,11 +76,22 @@ async function getFriends(userUid) {
       .then(
           (snapshot) => {
             // Convert the snapshot query into requested values
-            const values = getValuesFromSnapshot(snapshot);
-            // The response must not contains current user id
-            const friendIds = values.filter((userId) => userId != userUid);
-
-            return {response: friendIds};
+            const valuesIds = getFieldValuesFromSnapshot(snapshot);
+            // The response must not contains current user id doing the request
+            const friendIds = valuesIds.filter((userId) => userId != userUid);
+            // Get all friends' phone numbers thanks to their ids
+            return getFriendsFromIds(friendIds)
+                .then(
+                    (snapshot) => {
+                      const friends = getDocsFromSnapshot(snapshot);
+                      return {response: friends};
+                    })
+                .catch(
+                    (error) => {
+                      console.log("Error trying to get friends.");
+                      return {response: []};
+                    },
+                );
           })
       .catch(
           (error) => {
@@ -90,11 +102,23 @@ async function getFriends(userUid) {
 }
 
 /**
+ * Returns friends from their ids
+ * @param {Array} friendsIds The array of friends ids
+ * @return {Array} An array of friends with their ids and phone numbers
+ */
+async function getFriendsFromIds(friendsIds) {
+  return db
+      .collection(COLLECTION_NAME_USERS)
+      .where("userId", "in", friendsIds)
+      .get();
+}
+
+/**
  * Transforms a snapshot response into an array
  * @param {QuerySnapshot} snapshot The docs in snapshots
  * @return {Array} The array of data from the snapshots
  */
-function getValuesFromSnapshot(snapshot) {
+function getFieldValuesFromSnapshot(snapshot) {
   const values = [];
 
   if (snapshot.empty) {
@@ -104,12 +128,30 @@ function getValuesFromSnapshot(snapshot) {
 
   snapshot.docs.forEach((doc) => {
     const fields = doc.data();
-    const arrayOfUserIds = fields["userIds"];
-    arrayOfUserIds.forEach((userIds) => {
+    const arrayOfFields = fields["userIds"];
+    arrayOfFields.forEach((userIds) => {
       values.push(userIds);
     });
   });
   return values;
+}
+
+/**
+ * Transforms a snapshot response into an array of documents
+ * @param {QuerySnapshot} snapshot The documents in the snapshot
+ * @return {*} The documents from the snapshot
+ */
+function getDocsFromSnapshot(snapshot) {
+  if (snapshot.empty) {
+    console.log("No matching documents.");
+    return {response: []};
+  }
+
+  const arrayOfDocs = [];
+  snapshot.docs.forEach((doc) => {
+    arrayOfDocs.push(doc.data());
+  });
+  return arrayOfDocs;
 }
 
 /**
