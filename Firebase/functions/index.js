@@ -1,8 +1,7 @@
 
 const functions = require("firebase-functions");
 const {initializeApp} = require("firebase-admin/app");
-const {getFirestore, /* , Timestamp, DocumentReference*/
-} = require("firebase-admin/firestore");
+const {getFirestore, Timestamp} = require("firebase-admin/firestore");
 
 initializeApp();
 
@@ -71,10 +70,11 @@ exports.sendInvitation = functions
 
       return db
           .collection(COLLECTION_NAME_INVITATIONS)
-          .doc(userUid)
+          .doc(createDocumentName(userUid, userInvitedId))
           .set({
             "from": userUid,
             "to": userInvitedId,
+            "timestamp": Timestamp.now(),
           })
           .then(
               () => { // onSuccess
@@ -90,6 +90,22 @@ exports.sendInvitation = functions
     });
 
 /* ===== Private functions ===== */
+
+/**
+ * Generates a document name by comparing the alphabetic orders of two strings
+ * @param {String} str1 The first string
+ * @param {String} str2 The second string
+ * @return {String} The document name generated
+ */
+function createDocumentName(str1, str2) {
+  const SEPARATOR = "_";
+  if (str1.localeCompare(str2)) {
+    // If str1 > str2
+    return str1.concat(SEPARATOR, str2);
+  }
+  // Else if str1 <= str2
+  return str2.concat(SEPARATOR, str1);
+}
 
 /**
  * Gets the friendships of a user
