@@ -12,6 +12,7 @@ const db = getFirestore();
 
 const COLLECTION_NAME_USERS = "users";
 const COLLECTION_NAME_FRIENDS = "friends";
+const COLLECTION_NAME_INVITATIONS = "invitations";
 const BATCH_SIZE = 10;
 
 /* ===== Triggers ===== */
@@ -60,6 +61,34 @@ exports.getFriends = functions
       return getFriends(userUid);
     });
 
+exports.sendInvitation = functions
+    .https.onCall((data, context) => {
+      securityChecks(context);
+      authChecks(context);
+
+      const userUid = context.auth.uid;
+      const userInvitedId = data.userId;
+
+      return db
+          .collection(COLLECTION_NAME_INVITATIONS)
+          .doc(userUid)
+          .set({
+            "from": userUid,
+            "to": userInvitedId,
+          })
+          .then(
+              () => { // onSuccess
+                return {response: "Invitation sent!"};
+              },
+              () => { // onFailed
+                throw new functions.https.HttpsError(
+                    "not-found",
+                    "Failed to send the invitation.",
+                );
+              },
+          );
+    });
+
 /* ===== Private functions ===== */
 
 /**
@@ -68,7 +97,6 @@ exports.getFriends = functions
  * @return {*} The friendships
  */
 async function getFriends(userUid) {
-  functions.logger.log("userUid:", userUid);
   return db
       .collection(COLLECTION_NAME_FRIENDS)
       .where("userIds", "array-contains", userUid)
