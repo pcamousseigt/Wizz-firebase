@@ -61,6 +61,25 @@ exports.getUsername = functions
       return getUsername(userUid);
     });
 
+exports.updateUsername = functions
+    .https.onCall((data, context) => {
+      securityChecks(context);
+      authChecks(context);
+
+      const userUid = context.auth.uid;
+      const username = data.username;
+
+      const updated = setUsername(userUid, username);
+      if (updated) {
+        return {response: "Username updated!"};
+      } else {
+        throw new functions.https.HttpsError(
+            "not-found",
+            "Failed to update the username.",
+        );
+      }
+    });
+
 exports.getFriends = functions
     .https.onCall((data, context) => {
       securityChecks(context);
@@ -182,6 +201,28 @@ async function getUsername(userUid) {
           (error) => {
             console.log("Error trying to get username.");
             return {response: []};
+          },
+      );
+}
+
+/**
+ * Update the username of a user
+ * @param {String} userUid The id of the user requested
+ * @param {String} username The new username
+ * @return {Boolean} True if updated else false
+ */
+async function setUsername(userUid, username) {
+  return db
+      .collection(COLLECTION_NAME_USERS)
+      .doc(userUid)
+      .update({userName: username})
+      .then(
+          (snapshot) => {
+            return true;
+          })
+      .catch(
+          (error) => {
+            return false;
           },
       );
 }
