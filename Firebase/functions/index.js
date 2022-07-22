@@ -26,6 +26,8 @@ exports.createUser = functions.auth.user()
           .set({
             "userId": user.uid,
             "phoneNumber": user.phoneNumber,
+            "userName": user.phoneNumber,
+            "timestamp": Timestamp.now(),
           });
     });
 
@@ -89,6 +91,15 @@ exports.sendInvitation = functions
           );
     });
 
+exports.getInvitationsSent = functions
+    .https.onCall((data, context) => {
+      securityChecks(context);
+      authChecks(context);
+
+      const userUid = context.auth.uid;
+      return getInvitationsSent(userUid);
+    });
+
 /* ===== Private functions ===== */
 
 /**
@@ -108,6 +119,41 @@ function createDocumentName(str1, str2) {
 }
 
 /**
+ * Get all the users invited
+ * @param {String} userUid The user who invited
+ * @return {List} The list of users invited
+ */
+async function getInvitationsSent(userUid) {
+  return db
+      .collection(COLLECTION_NAME_INVITATIONS)
+      .where("from", "==", userUid)
+      .get()
+      .then(
+          (snapshot) => {
+            // Convert the snapshot query into requested values
+            const userIds = getFieldValuesFromSnapshot(snapshot, "to");
+            return getUsersFromIds(userIds)
+                .then(
+                    (snapshot) => {
+                      const usersInvited = getDocsFromSnapshot(snapshot);
+                      return {response: usersInvited};
+                    })
+                .catch(
+                    (error) => {
+                      console.log("Error trying to get friends.");
+                      return {response: []};
+                    },
+                );
+          })
+      .catch(
+          (error) => {
+            console.log("Error trying to get users invited.");
+            return {response: []};
+          },
+      );
+}
+
+/**
  * Gets the friendships of a user
  * @param {String} userUid The user whose friendships are requested
  * @return {*} The friendships
@@ -120,11 +166,11 @@ async function getFriends(userUid) {
       .then(
           (snapshot) => {
             // Convert the snapshot query into requested values
-            const valuesIds = getFieldValuesFromSnapshot(snapshot);
+            const valuesIds = getFieldValuesFromSnapshot(snapshot, "userIds");
             // The response must not contains current user id doing the request
             const friendIds = valuesIds.filter((userId) => userId != userUid);
             // Get all friends' phone numbers thanks to their ids
-            return getFriendsFromIds(friendIds)
+            return getUsersFromIds(friendIds)
                 .then(
                     (snapshot) => {
                       const friends = getDocsFromSnapshot(snapshot);
@@ -150,7 +196,7 @@ async function getFriends(userUid) {
  * @param {Array} friendsIds The array of friends ids
  * @return {Array} An array of friends with their ids and phone numbers
  */
-async function getFriendsFromIds(friendsIds) {
+async function getUsersFromIds(friendsIds) {
   return db
       .collection(COLLECTION_NAME_USERS)
       .where("userId", "in", friendsIds)
@@ -160,9 +206,10 @@ async function getFriendsFromIds(friendsIds) {
 /**
  * Transforms a snapshot response into an array
  * @param {QuerySnapshot} snapshot The docs in snapshots
+ * @param {String} fieldName The name of the field
  * @return {Array} The array of data from the snapshots
  */
-function getFieldValuesFromSnapshot(snapshot) {
+function getFieldValuesFromSnapshot(snapshot, fieldName) {
   const values = [];
 
   if (snapshot.empty) {
@@ -171,10 +218,10 @@ function getFieldValuesFromSnapshot(snapshot) {
   }
 
   snapshot.docs.forEach((doc) => {
-    const fields = doc.data();
-    const arrayOfFields = fields["userIds"];
-    arrayOfFields.forEach((userIds) => {
-      values.push(userIds);
+    const data = doc.data();
+    const arrayOfFields = data[fieldName];
+    arrayOfFields.forEach((field) => {
+      values.push(field);
     });
   });
   return values;
