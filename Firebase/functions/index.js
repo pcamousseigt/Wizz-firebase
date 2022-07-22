@@ -27,7 +27,6 @@ exports.createUser = functions.auth.user()
             "userId": user.uid,
             "phoneNumber": user.phoneNumber,
             "userName": user.phoneNumber,
-            "timestamp": Timestamp.now(),
           });
     });
 
@@ -51,6 +50,16 @@ exports.deleteUser = functions.auth.user()
     });
 
 /* ===== Functions onCall ===== */
+
+exports.getUsername = functions
+    .https.onCall((data, context) => {
+      securityChecks(context);
+      authChecks(context);
+
+      const userUid = context.auth.uid;
+
+      return getUsername(userUid);
+    });
 
 exports.getFriends = functions
     .https.onCall((data, context) => {
@@ -131,7 +140,7 @@ async function getInvitationsSent(userUid) {
       .then(
           (snapshot) => {
             // Convert the snapshot query into requested values
-            const userIds = getFieldValuesFromSnapshot(snapshot, "to");
+            const userIds = getFieldValuesFromArraySnapshot(snapshot, "to");
             return getUsersFromIds(userIds)
                 .then(
                     (snapshot) => {
@@ -154,6 +163,30 @@ async function getInvitationsSent(userUid) {
 }
 
 /**
+ * Gets the username of a user
+ * @param {String} userUid The id of the user requested
+ * @return {*} The username
+ */
+async function getUsername(userUid) {
+  return db
+      .collection(COLLECTION_NAME_USERS)
+      .where("userId", "==", userUid)
+      .get()
+      .then(
+          (snapshot) => {
+            // Convert the snapshot query into requested values
+            const username = getFieldValueFromSnapshot(snapshot, "userName");
+            return {response: username};
+          })
+      .catch(
+          (error) => {
+            console.log("Error trying to get username.");
+            return {response: []};
+          },
+      );
+}
+
+/**
  * Gets the friendships of a user
  * @param {String} userUid The user whose friendships are requested
  * @return {*} The friendships
@@ -166,9 +199,9 @@ async function getFriends(userUid) {
       .then(
           (snapshot) => {
             // Convert the snapshot query into requested values
-            const valuesIds = getFieldValuesFromSnapshot(snapshot, "userIds");
+            const uids = getFieldValuesFromArraySnapshot(snapshot, "userIds");
             // The response must not contains current user id doing the request
-            const friendIds = valuesIds.filter((userId) => userId != userUid);
+            const friendIds = uids.filter((userId) => userId != userUid);
             // Get all friends' phone numbers thanks to their ids
             return getUsersFromIds(friendIds)
                 .then(
@@ -204,12 +237,12 @@ async function getUsersFromIds(friendsIds) {
 }
 
 /**
- * Transforms a snapshot response into an array
+ * Transforms a snapshot of an array response into an array
  * @param {QuerySnapshot} snapshot The docs in snapshots
  * @param {String} fieldName The name of the field
  * @return {Array} The array of data from the snapshots
  */
-function getFieldValuesFromSnapshot(snapshot, fieldName) {
+function getFieldValuesFromArraySnapshot(snapshot, fieldName) {
   const values = [];
 
   if (snapshot.empty) {
@@ -219,11 +252,34 @@ function getFieldValuesFromSnapshot(snapshot, fieldName) {
 
   snapshot.docs.forEach((doc) => {
     const data = doc.data();
+    console.log(data);
     const arrayOfFields = data[fieldName];
     arrayOfFields.forEach((field) => {
       values.push(field);
     });
   });
+  return values;
+}
+
+/**
+ * Transforms a simple snapshot response into an array
+ * @param {QuerySnapshot} snapshot The docs in snapshots
+ * @param {String} fieldName The name of the field
+ * @return {Array} The array of data from the snapshots
+ */
+function getFieldValueFromSnapshot(snapshot, fieldName) {
+  const values = [];
+
+  if (snapshot.empty) {
+    console.log("No matching documents.");
+    return {response: values};
+  }
+
+  const doc = snapshot.docs[0];
+  const value = doc.get(fieldName);
+  if (value != undefined) {
+    values.push(value);
+  }
   return values;
 }
 
