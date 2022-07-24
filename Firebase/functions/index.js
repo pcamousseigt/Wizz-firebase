@@ -17,6 +17,7 @@ const BATCH_SIZE = 10;
 /* ===== Triggers ===== */
 
 // Creates a user with the fireAuth id and phone number provided by the user
+// At the creation, the phone number is used for the username
 // Triggered when the user creates his account
 exports.createUser = functions.auth.user()
     .onCreate((user) => {
@@ -27,6 +28,7 @@ exports.createUser = functions.auth.user()
             "userId": user.uid,
             "phoneNumber": user.phoneNumber,
             "userName": user.phoneNumber,
+            "timestamp": Timestamp.now(),
           });
     });
 
@@ -42,11 +44,12 @@ exports.deleteUser = functions.auth.user()
         );
       }
 
+      // Deletes all the friends of the user
       deleteUserFriendships(userUid)
-          .then(
-              () => {
-                return deleteUser(userUid);
-              });
+          .then(() => {
+            // If success deletes the user
+            return deleteUser(userUid);
+          });
     });
 
 /* ===== Functions onCall ===== */
@@ -69,15 +72,7 @@ exports.updateUsername = functions
       const userUid = context.auth.uid;
       const username = data.username;
 
-      const updated = setUsername(userUid, username);
-      if (updated) {
-        return {response: "Username updated!"};
-      } else {
-        throw new functions.https.HttpsError(
-            "not-found",
-            "Failed to update the username.",
-        );
-      }
+      return setUsername(userUid, username);
     });
 
 exports.getFriends = functions
@@ -98,25 +93,6 @@ exports.sendInvitation = functions
       const userUid = context.auth.uid;
       const userInvitedId = data.userId;
 
-      /* return db
-          .collection(COLLECTION_NAME_INVITATIONS)
-          .doc(createDocumentName(userUid, userInvitedId))
-          .set({
-            "from": userUid,
-            "to": userInvitedId,
-            "timestamp": Timestamp.now(),
-          })
-          .then(
-              () => { // onSuccess
-                return {response: "Invitation sent!"};
-              },
-              () => { // onFailed
-                throw new functions.https.HttpsError(
-                    "not-found",
-                    "Failed to send the invitation.",
-                );
-              },
-          ); */
       return sendInvitation(userUid, userInvitedId);
     });
 
@@ -126,18 +102,19 @@ exports.getUsersInvited = functions
       authChecks(context);
 
       const userUid = context.auth.uid;
+
       return getUsersInvited(userUid);
     });
 
 /* ===== Private functions ===== */
 
 /**
- * Generates a document name by comparing the alphabetic orders of two strings
- * @param {String} str1 The first string
- * @param {String} str2 The second string
- * @return {String} The document name generated
+ * Concatenates two strings by comparing the alphabetic orders of two strings
+ * @param {String} str1 The first string to concatenate
+ * @param {String} str2 The second string to concatenate
+ * @return {String} The concatenated string with a separator
  */
-function createDocumentName(str1, str2) {
+function concat(str1, str2) {
   const SEPARATOR = "_";
   if (str1.localeCompare(str2)) {
     // If str1 > str2
@@ -148,44 +125,9 @@ function createDocumentName(str1, str2) {
 }
 
 /**
- * Get all the users invited
- * @param {String} userUid The user who invited
- * @return {List} The list of users invited
- */
-async function getUsersInvited(userUid) {
-  return db
-      .collection(COLLECTION_NAME_INVITATIONS)
-      .where("from", "==", userUid)
-      .get()
-      .then(
-          (snapshot) => {
-            // Convert the snapshot query into requested values
-            const userIds = getFieldValues(snapshot, "to");
-            return getUsersFromIds(userIds)
-                .then(
-                    (snapshot) => {
-                      const usersInvited = getDataFromDocuments(snapshot);
-                      return {response: usersInvited};
-                    })
-                .catch(
-                    (error) => {
-                      console.log("Error trying to get users invited from id.");
-                      return {response: []};
-                    },
-                );
-          })
-      .catch(
-          (error) => {
-            console.log("Error trying to get users invited.");
-            return {response: []};
-          },
-      );
-}
-
-/**
  * Gets the username of a user
  * @param {String} userUid The id of the user requested
- * @return {*} The username
+ * @return {String|null} If the user exists the username else null
  */
 async function getUsername(userUid) {
   return db
@@ -201,7 +143,7 @@ async function getUsername(userUid) {
       .catch(
           (error) => {
             console.log("Error trying to get username.");
-            return {response: []};
+            return {response: null};
           },
       );
 }
@@ -210,20 +152,54 @@ async function getUsername(userUid) {
  * Update the username of a user
  * @param {String} userUid The id of the user requested
  * @param {String} username The new username
- * @return {Boolean} True if updated else false
+ * @return {Boolean|HttpsError} True if updated else throws an error
  */
 async function setUsername(userUid, username) {
   return db
       .collection(COLLECTION_NAME_USERS)
       .doc(userUid)
       .update({userName: username})
+      .then(() => {
+        return true;
+      })
+      .catch(
+          (error) => {
+            throw new functions.https.HttpsError(
+                "not-found",
+                "Failed to update the username.",
+            );
+          },
+      );
+}
+
+/**
+ * Get all the users invited
+ * @param {String} userUid The user who invited
+ * @return {Array} The array of users invited
+ */
+async function getUsersInvited(userUid) {
+  const userRef = db.collection(COLLECTION_NAME_USERS).doc(userUid);
+  return db
+      .collection(COLLECTION_NAME_INVITATIONS)
+      .where("from", "==", userRef)
+      .get()
       .then(
           (snapshot) => {
-            return true;
+            // Gets an array of promises of user invited references
+            const promises = getUserInvitedRefs(snapshot, userRef);
+            // Waits for all promises in the array to finish
+            return Promise.allSettled(promises)
+                .then((results) => {
+                  // Gets an array of user objects from finished promises
+                  const usersInvited =
+                    getDataArrayFromFulfilledPromises(results);
+                  return {response: usersInvited};
+                });
           })
       .catch(
           (error) => {
-            return false;
+            console.log("Error trying to get users invited:"+error);
+            return {response: []};
           },
       );
 }
@@ -232,15 +208,15 @@ async function setUsername(userUid, username) {
  * Creates a document to set an invitation
  * @param {String} fromUserId The id of the user sending the invitation
  * @param {String} toUserId The id of the user invited
- * @return {*} A response if succeeded else a https error
+ * @return {*} A response if succeeded else throws an error
  */
 async function sendInvitation(fromUserId, toUserId) {
   return db
       .collection(COLLECTION_NAME_INVITATIONS)
-      .doc(createDocumentName(fromUserId, toUserId))
+      .doc(concat(fromUserId, toUserId))
       .set({
-        "from": fromUserId,
-        "to": toUserId,
+        "from": db.collection(COLLECTION_NAME_USERS).doc(fromUserId),
+        "to": db.collection(COLLECTION_NAME_USERS).doc(toUserId),
         "timestamp": Timestamp.now(),
       })
       .then(
@@ -256,155 +232,151 @@ async function sendInvitation(fromUserId, toUserId) {
       );
 }
 
+
 /**
- * Gets the friendships of a user
- * @param {String} userUid The user whose friendships are requested
- * @return {*} The friendships
+ * Gets the friends of a user
+ * @param {String} userUid The user identifier whose friendships are requested
+ * @return {Array} The array of friends or throws an exception
  */
 async function getFriends(userUid) {
+  const userRef = db.collection(COLLECTION_NAME_USERS).doc(userUid);
   return db
       .collection(COLLECTION_NAME_FRIENDS)
-      .where("userIds", "array-contains", userUid)
+      .where("userIds", "array-contains", userRef)
       .get()
       .then(
           (snapshot) => {
-            // Convert the snapshot query into requested values
-            const uids = getFieldValuesFromArray(snapshot, "userIds");
-            // The response must not contains current user id doing the request
-            const friendIds = uids.filter((userId) => userId != userUid);
-            // Get all friends' phone numbers thanks to their ids
-            return getUsersFromIds(friendIds)
-                .then(
-                    (snapshot) => {
-                      const friends = getDataFromDocuments(snapshot);
-                      return {response: friends};
-                    })
-                .catch(
-                    (error) => {
-                      console.log("Error trying to get friends.");
-                      return {response: []};
-                    },
-                );
+            const promises = getFriendRefs(snapshot, userRef);
+            return Promise.allSettled(promises)
+                .then((results) => {
+                  const friends = getDataArrayFromFulfilledPromises(results);
+                  return {response: friends};
+                });
           })
       .catch(
           (error) => {
-            console.log("Error trying to get friendships.");
+            console.log("Error trying to get friendships: "+error);
             return {response: []};
           },
       );
 }
 
 /**
- * Returns users from their ids
- * @param {Array} uids The array of user ids
- * @return {Array} An array of users
- */
-async function getUsersFromIds(uids) {
-  return db
-      .collection(COLLECTION_NAME_USERS)
-      .where("userId", "in", uids)
-      .get();
-}
-
-/**
- * Transforms a snapshot of a response into an array
+ * TODO
  * @param {QuerySnapshot} snapshot The docs in snapshots
- * @param {String} fieldName The name of the field
+ * @param {DocumentReference} currentUserRef TODO
  * @return {Array} The array of data from the snapshots
  */
-function getFieldValues(snapshot, fieldName) {
+function getFriendRefs(snapshot, currentUserRef) {
   const values = [];
 
   if (snapshot.empty) {
     console.log("No matching documents.");
-    return {response: values};
-  }
-
-  snapshot.docs.forEach((doc) => {
-    const value = doc.get(fieldName);
-    if (value != undefined) {
-      values.push(value);
-    }
-  });
-  return values;
-}
-
-/**
- * Transforms a snapshot of an array response into an array
- * @param {QuerySnapshot} snapshot The docs in snapshots
- * @param {String} arrayFieldName The name of the field
- * @return {Array} The array of data from the snapshots
- */
-function getFieldValuesFromArray(snapshot, arrayFieldName) {
-  const values = [];
-
-  if (snapshot.empty) {
-    console.log("No matching documents.");
-    return {response: values};
+    return values;
   }
 
   snapshot.docs.forEach((doc) => {
     const data = doc.data();
-    const arrayOfFields = data[arrayFieldName];
-    arrayOfFields.forEach((field) => {
-      values.push(field);
+    const userRefs = data["userIds"];
+    userRefs.forEach((userRef) => {
+      if (userRef.id != currentUserRef.id) {
+        values.push(userRef.get());
+      }
     });
   });
+
   return values;
 }
 
 /**
- * Transforms a simple snapshot response into an array
+ * TODO
  * @param {QuerySnapshot} snapshot The docs in snapshots
- * @param {String} fieldName The name of the field
+ * @param {DocumentReference} currentUserRef TODO
  * @return {Array} The array of data from the snapshots
  */
-function getFieldValueFromFirstDoc(snapshot, fieldName) {
+function getUserInvitedRefs(snapshot) {
   const values = [];
 
   if (snapshot.empty) {
     console.log("No matching documents.");
-    return {response: values};
+    return values;
   }
 
-  const doc = snapshot.docs[0];
-  const value = doc.get(fieldName);
-  if (value != undefined) {
-    values.push(value);
-  }
+  snapshot.docs.forEach((doc) => {
+    const data = doc.data();
+    const userRef = data["to"];
+    values.push(userRef.get());
+  });
+
   return values;
 }
 
 /**
- * Transforms a snapshot response into an array of documents
- * @param {QuerySnapshot} snapshot The documents in the snapshot
- * @return {*} The documents from the snapshot
+ * Gets a field value from the first document of a simple snapshot response
+ * @param {QuerySnapshot} snapshot The query snapshot containing the documents
+ * @param {String} fieldName The name of the field
+ * @return {*|Null} The value of the field or null if the field does not exists
  */
-function getDataFromDocuments(snapshot) {
+function getFieldValueFromFirstDoc(snapshot, fieldName) {
   if (snapshot.empty) {
     console.log("No matching documents.");
-    return {response: []};
+    return {response: null};
   }
 
-  const arrayOfDocs = [];
-  snapshot.docs.forEach((doc) => {
-    arrayOfDocs.push(doc.data());
+  // Gets the first document of the snapshot
+  const doc = snapshot.docs[0];
+  // Gets the value of the field
+  const value = doc.get(fieldName);
+  if (value != undefined) {
+    return value;
+  }
+
+  return null;
+}
+
+/**
+ * Gets the data from a document snapshot
+ * @param {QueryDocumentSnapshot} snapshot The document snapshot
+ * @return {Object} The data from the document snapshot
+ */
+function getDataFromDocument(snapshot) {
+  if (!snapshot.exists) {
+    console.log("No matching documents.");
+    return null;
+  }
+  return snapshot.data();
+}
+
+/**
+ * Gets the data of all fulfilled promises
+ * @param {Array} promises The array of promises
+ * @return {Array} The array of data extracted from each fulfilled promises
+ */
+function getDataArrayFromFulfilledPromises(promises) {
+  const dataArray = [];
+  promises.forEach((result) => {
+    if (result.status === "fulfilled") {
+      const data = getDataFromDocument(result.value);
+      if (data != null) {
+        dataArray.push(data);
+      }
+    }
   });
-  return arrayOfDocs;
+  return dataArray;
 }
 
 /**
  * Deletes all user friendships
- * @param {String} userUid The user whose friendships should be deleted.
+ * @param {String} userUid The user whose friendships should be deleted
  * @return {*} The response if the user friendships have been deleted
  * or throws an exception
  */
 async function deleteUserFriendships(userUid) {
-  const friendsDocsRef = db
+  const friendsDocRefs = db
       .collection(COLLECTION_NAME_FRIENDS)
       .where("userIds", "array-contains", userUid);
 
-  return deleteDocument(db, friendsDocsRef, BATCH_SIZE)
+  return deleteDocuments(db, friendsDocRefs, BATCH_SIZE)
       .then(
           () => { // onSuccess
             return {response: "User friendships are now deleted !"};
@@ -419,8 +391,8 @@ async function deleteUserFriendships(userUid) {
 }
 
 /**
- * Deletes the user
- * @param {String} userUid The user to delete.
+ * Deletes a user
+ * @param {String} userUid The identifier of the user to delete
  * @return {*} The response if the user has been deleted or throws an exception
  */
 async function deleteUser(userUid) {
@@ -444,12 +416,12 @@ async function deleteUser(userUid) {
 /**
  * Deletes documents
  * @param {Firestore} db The databse to use to execute the request
- * @param {DocumentReference} documentRef The documents to delete
+ * @param {QueryDocumentSnapshot} documentRefs The documents to delete
  * @param {Int} batchSize The maximum size of the batch
- * @return {*} TO DO
+ * @return {Promise} The promise of deleting the documents
  */
-async function deleteDocument(db, documentRef, batchSize) {
-  const query = documentRef.limit(batchSize);
+async function deleteDocuments(db, documentRefs, batchSize) {
+  const query = documentRefs.limit(batchSize);
 
   return new Promise((resolve, reject) => {
     deleteQueryBatch(db, query, resolve).catch(reject);
@@ -459,10 +431,10 @@ async function deleteDocument(db, documentRef, batchSize) {
 /**
  * Deletes the response of the query depending on batch size
  * in order to avoid memory problems
- * @param {Firestore} db The databse to use to execute the request
- * @param {*} query TO DO
- * @param {*} resolve TO DO
- * @return {*} TO DO
+ * @param {Firestore} db The database to use to execute the request
+ * @param {*} query The reference of documents to delete
+ * @param {*} resolve The function executed when finished
+ * @return {undefined} Nothing
  */
 async function deleteQueryBatch(db, query, resolve) {
   const snapshot = await query.get();
