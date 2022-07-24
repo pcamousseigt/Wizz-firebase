@@ -98,7 +98,7 @@ exports.sendInvitation = functions
       const userUid = context.auth.uid;
       const userInvitedId = data.userId;
 
-      return db
+      /* return db
           .collection(COLLECTION_NAME_INVITATIONS)
           .doc(createDocumentName(userUid, userInvitedId))
           .set({
@@ -116,16 +116,17 @@ exports.sendInvitation = functions
                     "Failed to send the invitation.",
                 );
               },
-          );
+          ); */
+      return sendInvitation(userUid, userInvitedId);
     });
 
-exports.getInvitationsSent = functions
+exports.getUsersInvited = functions
     .https.onCall((data, context) => {
       securityChecks(context);
       authChecks(context);
 
       const userUid = context.auth.uid;
-      return getInvitationsSent(userUid);
+      return getUsersInvited(userUid);
     });
 
 /* ===== Private functions ===== */
@@ -151,7 +152,7 @@ function createDocumentName(str1, str2) {
  * @param {String} userUid The user who invited
  * @return {List} The list of users invited
  */
-async function getInvitationsSent(userUid) {
+async function getUsersInvited(userUid) {
   return db
       .collection(COLLECTION_NAME_INVITATIONS)
       .where("from", "==", userUid)
@@ -159,16 +160,16 @@ async function getInvitationsSent(userUid) {
       .then(
           (snapshot) => {
             // Convert the snapshot query into requested values
-            const userIds = getFieldValuesFromArraySnapshot(snapshot, "to");
+            const userIds = getFieldValues(snapshot, "to");
             return getUsersFromIds(userIds)
                 .then(
                     (snapshot) => {
-                      const usersInvited = getDocsFromSnapshot(snapshot);
+                      const usersInvited = getDataFromDocuments(snapshot);
                       return {response: usersInvited};
                     })
                 .catch(
                     (error) => {
-                      console.log("Error trying to get friends.");
+                      console.log("Error trying to get users invited from id.");
                       return {response: []};
                     },
                 );
@@ -194,7 +195,7 @@ async function getUsername(userUid) {
       .then(
           (snapshot) => {
             // Convert the snapshot query into requested values
-            const username = getFieldValueFromSnapshot(snapshot, "userName");
+            const username = getFieldValueFromFirstDoc(snapshot, "userName");
             return {response: username};
           })
       .catch(
@@ -228,6 +229,34 @@ async function setUsername(userUid, username) {
 }
 
 /**
+ * Creates a document to set an invitation
+ * @param {String} fromUserId The id of the user sending the invitation
+ * @param {String} toUserId The id of the user invited
+ * @return {*} A response if succeeded else a https error
+ */
+async function sendInvitation(fromUserId, toUserId) {
+  return db
+      .collection(COLLECTION_NAME_INVITATIONS)
+      .doc(createDocumentName(fromUserId, toUserId))
+      .set({
+        "from": fromUserId,
+        "to": toUserId,
+        "timestamp": Timestamp.now(),
+      })
+      .then(
+          () => { // onSuccess
+            return {response: "Invitation sent!"};
+          },
+          () => { // onFailed
+            throw new functions.https.HttpsError(
+                "not-found",
+                "Failed to send the invitation.",
+            );
+          },
+      );
+}
+
+/**
  * Gets the friendships of a user
  * @param {String} userUid The user whose friendships are requested
  * @return {*} The friendships
@@ -240,14 +269,14 @@ async function getFriends(userUid) {
       .then(
           (snapshot) => {
             // Convert the snapshot query into requested values
-            const uids = getFieldValuesFromArraySnapshot(snapshot, "userIds");
+            const uids = getFieldValuesFromArray(snapshot, "userIds");
             // The response must not contains current user id doing the request
             const friendIds = uids.filter((userId) => userId != userUid);
             // Get all friends' phone numbers thanks to their ids
             return getUsersFromIds(friendIds)
                 .then(
                     (snapshot) => {
-                      const friends = getDocsFromSnapshot(snapshot);
+                      const friends = getDataFromDocuments(snapshot);
                       return {response: friends};
                     })
                 .catch(
@@ -266,24 +295,47 @@ async function getFriends(userUid) {
 }
 
 /**
- * Returns friends from their ids
- * @param {Array} friendsIds The array of friends ids
- * @return {Array} An array of friends with their ids and phone numbers
+ * Returns users from their ids
+ * @param {Array} uids The array of user ids
+ * @return {Array} An array of users
  */
-async function getUsersFromIds(friendsIds) {
+async function getUsersFromIds(uids) {
   return db
       .collection(COLLECTION_NAME_USERS)
-      .where("userId", "in", friendsIds)
+      .where("userId", "in", uids)
       .get();
+}
+
+/**
+ * Transforms a snapshot of a response into an array
+ * @param {QuerySnapshot} snapshot The docs in snapshots
+ * @param {String} fieldName The name of the field
+ * @return {Array} The array of data from the snapshots
+ */
+function getFieldValues(snapshot, fieldName) {
+  const values = [];
+
+  if (snapshot.empty) {
+    console.log("No matching documents.");
+    return {response: values};
+  }
+
+  snapshot.docs.forEach((doc) => {
+    const value = doc.get(fieldName);
+    if (value != undefined) {
+      values.push(value);
+    }
+  });
+  return values;
 }
 
 /**
  * Transforms a snapshot of an array response into an array
  * @param {QuerySnapshot} snapshot The docs in snapshots
- * @param {String} fieldName The name of the field
+ * @param {String} arrayFieldName The name of the field
  * @return {Array} The array of data from the snapshots
  */
-function getFieldValuesFromArraySnapshot(snapshot, fieldName) {
+function getFieldValuesFromArray(snapshot, arrayFieldName) {
   const values = [];
 
   if (snapshot.empty) {
@@ -293,8 +345,7 @@ function getFieldValuesFromArraySnapshot(snapshot, fieldName) {
 
   snapshot.docs.forEach((doc) => {
     const data = doc.data();
-    console.log(data);
-    const arrayOfFields = data[fieldName];
+    const arrayOfFields = data[arrayFieldName];
     arrayOfFields.forEach((field) => {
       values.push(field);
     });
@@ -308,7 +359,7 @@ function getFieldValuesFromArraySnapshot(snapshot, fieldName) {
  * @param {String} fieldName The name of the field
  * @return {Array} The array of data from the snapshots
  */
-function getFieldValueFromSnapshot(snapshot, fieldName) {
+function getFieldValueFromFirstDoc(snapshot, fieldName) {
   const values = [];
 
   if (snapshot.empty) {
@@ -329,7 +380,7 @@ function getFieldValueFromSnapshot(snapshot, fieldName) {
  * @param {QuerySnapshot} snapshot The documents in the snapshot
  * @return {*} The documents from the snapshot
  */
-function getDocsFromSnapshot(snapshot) {
+function getDataFromDocuments(snapshot) {
   if (snapshot.empty) {
     console.log("No matching documents.");
     return {response: []};
