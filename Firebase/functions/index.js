@@ -9,9 +9,9 @@ const db = getFirestore();
 
 /* ===== Constants ===== */
 
-const COLLECTION_NAME_USERS = "users";
-const COLLECTION_NAME_FRIENDS = "friends";
-const COLLECTION_NAME_INVITATIONS = "invitations";
+const COLLECTION_USERS = "users";
+const COLLECTION_FRIENDS = "friends";
+const COLLECTION_INVITATIONS = "invitations";
 const BATCH_SIZE = 10;
 
 /* ===== Triggers ===== */
@@ -22,7 +22,7 @@ const BATCH_SIZE = 10;
 exports.createUser = functions.auth.user()
     .onCreate((user) => {
       return db
-          .collection(COLLECTION_NAME_USERS)
+          .collection(COLLECTION_USERS)
           .doc(user.uid)
           .set({
             "userId": user.uid,
@@ -106,6 +106,17 @@ exports.getUsersInvited = functions
       return getUsersInvited(userUid);
     });
 
+exports.withdrawInvitation = functions
+    .https.onCall((data, context) => {
+      securityChecks(context);
+      authChecks(context);
+
+      const userUid = context.auth.uid;
+      const userInvitedId = data.userId;
+
+      return withdrawInvitation(userUid, userInvitedId);
+    });
+
 /* ===== Private functions ===== */
 
 /**
@@ -131,7 +142,7 @@ function concat(str1, str2) {
  */
 async function getUsername(userUid) {
   return db
-      .collection(COLLECTION_NAME_USERS)
+      .collection(COLLECTION_USERS)
       .where("userId", "==", userUid)
       .get()
       .then(
@@ -156,7 +167,7 @@ async function getUsername(userUid) {
  */
 async function setUsername(userUid, username) {
   return db
-      .collection(COLLECTION_NAME_USERS)
+      .collection(COLLECTION_USERS)
       .doc(userUid)
       .update({userName: username})
       .then(() => {
@@ -173,14 +184,70 @@ async function setUsername(userUid, username) {
 }
 
 /**
+ * Gets the friends of a user
+ * @param {String} userUid The user identifier whose friendships are requested
+ * @return {Array} The array of friends or throws an exception
+ */
+async function getFriends(userUid) {
+  const userRef = db.collection(COLLECTION_USERS).doc(userUid);
+  return db
+      .collection(COLLECTION_FRIENDS)
+      .where("userIds", "array-contains", userRef)
+      .get()
+      .then(
+          (snapshot) => {
+            const promises = getFriendRefs(snapshot, userRef);
+            return Promise.allSettled(promises)
+                .then((results) => {
+                  const friends = getDataArrayFromFulfilledPromises(results);
+                  return {response: friends};
+                });
+          })
+      .catch(
+          (error) => {
+            console.log("Error trying to get friendships: "+error);
+            return {response: []};
+          },
+      );
+}
+
+/**
+ * Creates a document to set an invitation
+ * @param {String} fromUserId The id of the user sending the invitation
+ * @param {String} toUserId The id of the user invited
+ * @return {*} A response if succeeded else throws an error
+ */
+async function sendInvitation(fromUserId, toUserId) {
+  return db
+      .collection(COLLECTION_INVITATIONS)
+      .doc(concat(fromUserId, toUserId))
+      .set({
+        "from": db.collection(COLLECTION_USERS).doc(fromUserId),
+        "to": db.collection(COLLECTION_USERS).doc(toUserId),
+        "timestamp": Timestamp.now(),
+      })
+      .then(
+          () => { // onSuccess
+            return {response: "Invitation sent!"};
+          },
+          () => { // onFailed
+            throw new functions.https.HttpsError(
+                "not-found",
+                "Failed to send the invitation.",
+            );
+          },
+      );
+}
+
+/**
  * Get all the users invited
  * @param {String} userUid The user who invited
  * @return {Array} The array of users invited
  */
 async function getUsersInvited(userUid) {
-  const userRef = db.collection(COLLECTION_NAME_USERS).doc(userUid);
+  const userRef = db.collection(COLLECTION_USERS).doc(userUid);
   return db
-      .collection(COLLECTION_NAME_INVITATIONS)
+      .collection(COLLECTION_INVITATIONS)
       .where("from", "==", userRef)
       .get()
       .then(
@@ -205,67 +272,41 @@ async function getUsersInvited(userUid) {
 }
 
 /**
- * Creates a document to set an invitation
- * @param {String} fromUserId The id of the user sending the invitation
- * @param {String} toUserId The id of the user invited
- * @return {*} A response if succeeded else throws an error
+ * Withdraws an invitation sent to a user
+ * @param {String} currentUserUid The current user identifier
+ * @param {String} userInvitedUid The identifier of the user from whom
+ * to withdraw the invitation
+ * @return {Boolean} True if withdrawn else throws an exception
  */
-async function sendInvitation(fromUserId, toUserId) {
-  return db
-      .collection(COLLECTION_NAME_INVITATIONS)
-      .doc(concat(fromUserId, toUserId))
-      .set({
-        "from": db.collection(COLLECTION_NAME_USERS).doc(fromUserId),
-        "to": db.collection(COLLECTION_NAME_USERS).doc(toUserId),
-        "timestamp": Timestamp.now(),
-      })
+async function withdrawInvitation(currentUserUid, userInvitedUid) {
+  const currUserRef = db.collection(COLLECTION_USERS).doc(currentUserUid);
+  const userInvitedRef = db.collection(COLLECTION_USERS).doc(userInvitedUid);
+
+  const invitationsRef = db
+      .collection(COLLECTION_INVITATIONS)
+      .where("from", "==", currUserRef)
+      .where("to", "==", userInvitedRef);
+
+  return deleteDocuments(db, invitationsRef, BATCH_SIZE)
       .then(
           () => { // onSuccess
-            return {response: "Invitation sent!"};
+            return true;
           },
           () => { // onFailed
             throw new functions.https.HttpsError(
                 "not-found",
-                "Failed to send the invitation.",
+                "Failed to withdraw the invitation.",
             );
           },
       );
 }
 
-
 /**
- * Gets the friends of a user
- * @param {String} userUid The user identifier whose friendships are requested
- * @return {Array} The array of friends or throws an exception
- */
-async function getFriends(userUid) {
-  const userRef = db.collection(COLLECTION_NAME_USERS).doc(userUid);
-  return db
-      .collection(COLLECTION_NAME_FRIENDS)
-      .where("userIds", "array-contains", userRef)
-      .get()
-      .then(
-          (snapshot) => {
-            const promises = getFriendRefs(snapshot, userRef);
-            return Promise.allSettled(promises)
-                .then((results) => {
-                  const friends = getDataArrayFromFulfilledPromises(results);
-                  return {response: friends};
-                });
-          })
-      .catch(
-          (error) => {
-            console.log("Error trying to get friendships: "+error);
-            return {response: []};
-          },
-      );
-}
-
-/**
- * TODO
- * @param {QuerySnapshot} snapshot The docs in snapshots
- * @param {DocumentReference} currentUserRef TODO
- * @return {Array} The array of data from the snapshots
+ * Gets the promises of friend objects of the current user
+ * @param {QuerySnapshot} snapshot The snapshot containing the documents
+ * @param {DocumentReference} currentUserRef The current user requesting
+ * the friendships
+ * @return {Array} The array of promises of user objects
  */
 function getFriendRefs(snapshot, currentUserRef) {
   const values = [];
@@ -289,10 +330,9 @@ function getFriendRefs(snapshot, currentUserRef) {
 }
 
 /**
- * TODO
- * @param {QuerySnapshot} snapshot The docs in snapshots
- * @param {DocumentReference} currentUserRef TODO
- * @return {Array} The array of data from the snapshots
+ * Gets the promises of invited user objects
+ * @param {QuerySnapshot} snapshot The snapshot containing the documents
+ * @return {Array} The array of promises of user objects
  */
 function getUserInvitedRefs(snapshot) {
   const values = [];
@@ -367,13 +407,13 @@ function getDataArrayFromFulfilledPromises(promises) {
 
 /**
  * Deletes all user friendships
- * @param {String} userUid The user whose friendships should be deleted
+ * @param {String} userUid The user id whose friendships have to be deleted
  * @return {*} The response if the user friendships have been deleted
  * or throws an exception
  */
 async function deleteUserFriendships(userUid) {
   const friendsDocRefs = db
-      .collection(COLLECTION_NAME_FRIENDS)
+      .collection(COLLECTION_FRIENDS)
       .where("userIds", "array-contains", userUid);
 
   return deleteDocuments(db, friendsDocRefs, BATCH_SIZE)
@@ -397,7 +437,7 @@ async function deleteUserFriendships(userUid) {
  */
 async function deleteUser(userUid) {
   return db
-      .collection(COLLECTION_NAME_USERS)
+      .collection(COLLECTION_USERS)
       .doc(userUid)
       .delete()
       .then(
