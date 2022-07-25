@@ -85,6 +85,17 @@ exports.getFriends = functions
       return getFriends(userUid);
     });
 
+exports.deleteFriendship = functions
+    .https.onCall((data, context) => {
+      securityChecks(context);
+      authChecks(context);
+
+      const userUid = context.auth.uid;
+      const friendId = data.userId;
+
+      return deleteUserFriendship(userUid, friendId);
+    });
+
 exports.sendInvitation = functions
     .https.onCall((data, context) => {
       securityChecks(context);
@@ -403,6 +414,32 @@ function getDataArrayFromFulfilledPromises(promises) {
     }
   });
   return dataArray;
+}
+
+/**
+ * Deletes a user friendship
+ * @param {String} currUserId The user id whose the friendship has to be deleted
+ * @param {String} friendId The user id to unfriend
+ * @return {Boolean} True if the user friendship has been deleted
+ * or throws an exception
+ */
+async function deleteUserFriendship(currUserId, friendId) {
+  const docName = concat(currUserId, friendId);
+  return db
+      .collection(COLLECTION_FRIENDS)
+      .doc(docName)
+      .delete()
+      .then(
+          () => { // onSuccess
+            return true;
+          },
+          () => { // onFailed
+            throw new functions.https.HttpsError(
+                "not-found",
+                "Failed to delete the user friendship.",
+            );
+          },
+      );
 }
 
 /**
