@@ -149,6 +149,17 @@ exports.acceptInvitation = functions
       return acceptInvitation(userInvitedMeId, userUid);
     });
 
+exports.refuseInvitation = functions
+    .https.onCall((data, context) => {
+      securityChecks(context);
+      authChecks(context);
+
+      const userUid = context.auth.uid;
+      const userInvitedMeId = data.userId;
+
+      return withdrawInvitation(userInvitedMeId, userUid);
+    });
+
 /* ===== Private functions ===== */
 
 /**
@@ -395,20 +406,6 @@ async function acceptInvitation(userSenderUid, userInvitedUid) {
             return {response: false};
           },
       );
-
-  /* Promise.allSettled([withdrawPromise])
-      .then((results) => {
-        results.forEach((result) => {
-          if (result.status === "fulfilled") {
-            const created = createFriendship(userSenderUid, userInvitedUid);
-            console.log("friendshipCreated");
-            console.log(created);
-            return {response: created};
-          }
-        });
-      });
-
-  return {response: false}; */
 }
 
 /**
@@ -575,10 +572,9 @@ function getDataArrayFromFulfilledPromises(promises) {
  * or throws an exception
  */
 async function deleteUserFriendship(currUserId, friendId) {
-  const docName = concat(currUserId, friendId);
   return db
       .collection(COLLECTION_FRIENDS)
-      .doc(docName)
+      .doc(concat(currUserId, friendId))
       .delete()
       .then(
           () => { // onSuccess
