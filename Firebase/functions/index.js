@@ -128,6 +128,16 @@ exports.withdrawInvitation = functions
       return withdrawInvitation(userUid, userInvitedId);
     });
 
+exports.getUsersInvitedMe = functions
+    .https.onCall((data, context) => {
+      securityChecks(context);
+      authChecks(context);
+
+      const userUid = context.auth.uid;
+
+      return getUsersInvitedMe(userUid);
+    });
+
 /* ===== Private functions ===== */
 
 /**
@@ -308,6 +318,38 @@ async function withdrawInvitation(currentUserUid, userInvitedUid) {
                 "not-found",
                 "Failed to withdraw the invitation.",
             );
+          },
+      );
+}
+
+/**
+ * Get all the users who invited me
+ * @param {String} userUid The user who has been invited
+ * @return {Array} The array of users wo invited me
+ */
+async function getUsersInvitedMe(userUid) {
+  const userRef = db.collection(COLLECTION_USERS).doc(userUid);
+  return db
+      .collection(COLLECTION_INVITATIONS)
+      .where("to", "==", userRef)
+      .get()
+      .then(
+          (snapshot) => {
+            // Gets an array of promises of user invited references
+            const promises = getUserInvitedRefs(snapshot, userRef);
+            // Waits for all promises in the array to finish
+            return Promise.allSettled(promises)
+                .then((results) => {
+                  // Gets an array of user objects from finished promises
+                  const usersInvited =
+                    getDataArrayFromFulfilledPromises(results);
+                  return {response: usersInvited};
+                });
+          })
+      .catch(
+          (error) => {
+            console.log("Error trying to get users invited:"+error);
+            return {response: []};
           },
       );
 }
