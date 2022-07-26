@@ -160,6 +160,16 @@ exports.refuseInvitation = functions
       return withdrawInvitation(userInvitedMeId, userUid);
     });
 
+exports.getUsersFromContacts = functions
+    .https.onCall((data, context) => {
+      securityChecks(context);
+      authChecks(context);
+
+      const phoneNumbers = data.phoneNumbers;
+
+      return getUsersFromContacts(phoneNumbers);
+    });
+
 /* ===== Private functions ===== */
 
 /**
@@ -242,7 +252,11 @@ async function getFriends(userUid) {
             const promises = getFriendRefs(snapshot, userRef);
             return Promise.allSettled(promises)
                 .then((results) => {
-                  const friends = getDataArrayFromFulfilledPromises(results);
+                  const friends =
+                    getDataArrayFromQueryDocumentSnapshotPromises(
+                        results,
+                        "fulfilled",
+                    );
                   return {response: friends};
                 });
           })
@@ -302,7 +316,10 @@ async function getUsersInvited(userUid) {
                 .then((results) => {
                   // Gets an array of user objects from finished promises
                   const usersInvited =
-                    getDataArrayFromFulfilledPromises(results);
+                    getDataArrayFromQueryDocumentSnapshotPromises(
+                        results,
+                        "fulfilled",
+                    );
                   return {response: usersInvited};
                 });
           })
@@ -363,9 +380,12 @@ async function getUsersInvitedMe(userUid) {
             return Promise.allSettled(promises)
                 .then((results) => {
                   // Gets an array of user objects from finished promises
-                  const usersInvited =
-                    getDataArrayFromFulfilledPromises(results);
-                  return {response: usersInvited};
+                  const usersInvitedMe =
+                    getDataArrayFromQueryDocumentSnapshotPromises(
+                        results,
+                        "fulfilled",
+                    );
+                  return {response: usersInvitedMe};
                 });
           })
       .catch(
@@ -406,6 +426,36 @@ async function acceptInvitation(userSenderUid, userInvitedUid) {
             return {response: false};
           },
       );
+}
+
+/**
+ * Get all the users from an array of phone numbers
+ * @param {Array} phoneNumbers The array of phone numbers
+ * @return {Array} An array of user objects
+ */
+async function getUsersFromContacts(phoneNumbers) {
+  // Do not run if there aren't any phoneNumbers
+  if (!phoneNumbers || !phoneNumbers.length) return {response: []};
+
+  const collectionPath = db.collection(COLLECTION_USERS);
+  const batches = [];
+
+  while (phoneNumbers.length) {
+    // Firestore limits batches to 10
+    const batch = phoneNumbers.splice(0, 10);
+
+    // Add the batch request to a queue
+    batches.push(collectionPath.where("phoneNumber", "in", [...batch]).get());
+  }
+
+  return Promise.allSettled(batches)
+      .then((results) => {
+        const users = getDataArrayFromQuerySnapshotPromises(
+            results,
+            "fulfilled",
+        );
+        return {response: users};
+      });
 }
 
 /**
@@ -547,18 +597,42 @@ function getDataFromDocument(snapshot) {
 }
 
 /**
- * Gets the data of all fulfilled promises
- * @param {Array} promises The array of promises
- * @return {Array} The array of data extracted from each fulfilled promises
+ * Gets the data of all QueryDocumentSnapshot promises
+ * @param {Array} promises The array of QueryDocumentSnapshot promises
+ * @param {String} status The status of the promises
+ * @return {Array} The array of data extracted from each promises
  */
-function getDataArrayFromFulfilledPromises(promises) {
+function getDataArrayFromQueryDocumentSnapshotPromises(promises, status) {
   const dataArray = [];
   promises.forEach((result) => {
-    if (result.status === "fulfilled") {
+    if (result.status === status) {
+      console.log("result.value");
+      console.log(result.value);
       const data = getDataFromDocument(result.value);
       if (data != null) {
         dataArray.push(data);
       }
+    }
+  });
+  return dataArray;
+}
+
+/**
+ * Gets the data of all QuerySnapshot promises
+ * @param {Array} promises The array of QuerySnapshot promises
+ * @param {String} status The status of the promises
+ * @return {Array} The array of data extracted from each fulfilled promises
+ */
+function getDataArrayFromQuerySnapshotPromises(promises, status) {
+  const dataArray = [];
+  promises.forEach((result) => {
+    if (result.status === status) {
+      result.value.docs.forEach((doc) => {
+        const data = getDataFromDocument(doc);
+        if (data != null) {
+          dataArray.push(data);
+        }
+      });
     }
   });
   return dataArray;
