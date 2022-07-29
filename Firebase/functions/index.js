@@ -28,7 +28,7 @@ exports.createUser = functions.auth.user()
             "userId": user.uid,
             "phoneNumber": user.phoneNumber,
             "userName": user.phoneNumber,
-            "timestamp": Timestamp.now(),
+            "createdAt": Timestamp.now(),
           });
     });
 
@@ -96,6 +96,36 @@ exports.deleteFriendship = functions
       return deleteUserFriendship(userUid, friendId);
     });
 
+exports.getUsersInvited = functions
+    .https.onCall((data, context) => {
+      securityChecks(context);
+      authChecks(context);
+
+      const userUid = context.auth.uid;
+
+      return getUsersInvited(userUid);
+    });
+
+exports.getUsersInvitedMe = functions
+    .https.onCall((data, context) => {
+      securityChecks(context);
+      authChecks(context);
+
+      const userUid = context.auth.uid;
+
+      return getUsersInvitedMe(userUid);
+    });
+
+exports.getUsersFromContacts = functions
+    .https.onCall((data, context) => {
+      securityChecks(context);
+      authChecks(context);
+
+      const phoneNumbers = data.phoneNumbers;
+
+      return getUsersFromContacts(phoneNumbers);
+    });
+
 exports.sendInvitation = functions
     .https.onCall((data, context) => {
       securityChecks(context);
@@ -107,16 +137,6 @@ exports.sendInvitation = functions
       return sendInvitation(userUid, userInvitedId);
     });
 
-exports.getUsersInvited = functions
-    .https.onCall((data, context) => {
-      securityChecks(context);
-      authChecks(context);
-
-      const userUid = context.auth.uid;
-
-      return getUsersInvited(userUid);
-    });
-
 exports.withdrawInvitation = functions
     .https.onCall((data, context) => {
       securityChecks(context);
@@ -126,16 +146,6 @@ exports.withdrawInvitation = functions
       const userInvitedId = data.userId;
 
       return withdrawInvitation(userUid, userInvitedId);
-    });
-
-exports.getUsersInvitedMe = functions
-    .https.onCall((data, context) => {
-      securityChecks(context);
-      authChecks(context);
-
-      const userUid = context.auth.uid;
-
-      return getUsersInvitedMe(userUid);
     });
 
 exports.acceptInvitation = functions
@@ -160,14 +170,15 @@ exports.refuseInvitation = functions
       return withdrawInvitation(userInvitedMeId, userUid);
     });
 
-exports.getUsersFromContacts = functions
+exports.wizz = functions
     .https.onCall((data, context) => {
       securityChecks(context);
       authChecks(context);
 
-      const phoneNumbers = data.phoneNumbers;
+      const userUid = context.auth.uid;
+      const selectedFriendIds = data.selectedFriendsIds;
 
-      return getUsersFromContacts(phoneNumbers);
+      return wizz(userUid, selectedFriendIds);
     });
 
 /* ===== Private functions ===== */
@@ -180,11 +191,11 @@ exports.getUsersFromContacts = functions
  */
 function concat(str1, str2) {
   const SEPARATOR = "_";
-  if (str1.localeCompare(str2)) {
-    // If str1 > str2
+  if (str1.localeCompare(str2) <= 0) {
+    // If str1 <= str2
     return str1.concat(SEPARATOR, str2);
   }
-  // Else if str1 <= str2
+  // Else if str1 > str2
   return str2.concat(SEPARATOR, str1);
 }
 
@@ -222,7 +233,7 @@ async function setUsername(userUid, username) {
   return db
       .collection(COLLECTION_USERS)
       .doc(userUid)
-      .update({userName: username})
+      .update({userName: username, modifiedAt: Timestamp.now()})
       .then(() => {
         return true;
       })
@@ -281,7 +292,7 @@ async function sendInvitation(fromUserId, toUserId) {
       .set({
         "from": db.collection(COLLECTION_USERS).doc(fromUserId),
         "to": db.collection(COLLECTION_USERS).doc(toUserId),
-        "timestamp": Timestamp.now(),
+        "createdAt": Timestamp.now(),
       })
       .then(
           () => { // onSuccess
@@ -349,7 +360,6 @@ async function withdrawInvitation(userSenderId, userInvitedId) {
   return deleteDocuments(db, invitationsRef, BATCH_SIZE)
       .then(
           () => { // onSuccess
-            console.log("withdrawInvitation deleteDocuments onSuccess");
             return true;
           },
           () => { // onFailed
@@ -473,7 +483,7 @@ async function createFriendship(userId1, userId2) {
           db.collection(COLLECTION_USERS).doc(userId1),
           db.collection(COLLECTION_USERS).doc(userId2),
         ],
-        "timestamp": Timestamp.now(),
+        "createdAt": Timestamp.now(),
       })
       .then(
           () => { // onSuccess
@@ -486,6 +496,19 @@ async function createFriendship(userId1, userId2) {
             );
           },
       );
+}
+
+/**
+ * Creates wizz documents
+ * @param {String} userId1 The id of the user who wizz
+ * @param {Array} userIds The ids of the users to wizz
+ * @return {*} True if succeeded else throws an error
+ */
+async function wizz(userId1, userIds) {
+  console.log("userId1:" + userId1);
+  console.log("userId2:" + userIds);
+
+  return true;
 }
 
 /**
@@ -606,8 +629,6 @@ function getDataArrayFromQueryDocumentSnapshotPromises(promises, status) {
   const dataArray = [];
   promises.forEach((result) => {
     if (result.status === status) {
-      console.log("result.value");
-      console.log(result.value);
       const data = getDataFromDocument(result.value);
       if (data != null) {
         dataArray.push(data);
@@ -646,6 +667,7 @@ function getDataArrayFromQuerySnapshotPromises(promises, status) {
  * or throws an exception
  */
 async function deleteUserFriendship(currUserId, friendId) {
+  console.log(concat(currUserId, friendId));
   return db
       .collection(COLLECTION_FRIENDS)
       .doc(concat(currUserId, friendId))
