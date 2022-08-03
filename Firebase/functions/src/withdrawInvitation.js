@@ -1,8 +1,5 @@
 
-// import {db} from "./../db";
-// import {functions} from "./../index";
 const {functions, db} = require("./../db");
-// const functions = require("firebase-functions");
 const {
   COLLECTION_USERS,
   COLLECTION_INVITATIONS,

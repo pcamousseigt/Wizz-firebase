@@ -1,4 +1,4 @@
-// import {db} from "./../db";
+
 const {db} = require("./../db");
 const {COLLECTION_USERS, COLLECTION_INVITATIONS} = require("./globals");
 const {getUserInvitedMeRefs} = require("./getUserInvitedMeRefs");

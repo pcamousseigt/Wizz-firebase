@@ -1,7 +1,4 @@
 
-// const functions = require("firebase-functions");
-// import {db, Timestamp} from "./../db";
-// import {functions} from "./../index";
 const {functions, db, Timestamp} = require("./../db");
 const {COLLECTION_USERS, COLLECTION_INVITATIONS} = require("./globals");
 const {concat} = require("./concat");

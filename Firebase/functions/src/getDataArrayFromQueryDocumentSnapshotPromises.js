@@ -21,6 +21,24 @@ function getDataArrayFromQueryDocumentSnapshotPromises(
   return dataArray;
 }
 
+/**
+ * Gets the value of all QueryDocumentSnapshot promises
+ * @param {Array} promises The array of QueryDocumentSnapshot promises
+ * @param {String} status The status of the promises
+ * @return {Array} The array of value from each promises
+ */
+function getValuesFromQueryDocumentSnapshotPromises(
+    promises, status) {
+  const values = [];
+  promises.forEach((result) => {
+    if (result.status === status) {
+      values.push(result.value);
+    }
+  });
+  return values;
+}
+
 module.exports = {
   getDataArrayFromQueryDocumentSnapshotPromises,
+  getValuesFromQueryDocumentSnapshotPromises,
 };

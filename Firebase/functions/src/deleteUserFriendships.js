@@ -1,7 +1,4 @@
 
-// const functions = require("firebase-functions");
-// import {db} from "./../db";
-// import {functions} from "./../index";
 const {functions, db} = require("./../db");
 const {COLLECTION_FRIENDS, BATCH_SIZE} = require("./globals");
 const {deleteDocuments} = require("./deleteDocuments");

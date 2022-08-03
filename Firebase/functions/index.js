@@ -1,11 +1,7 @@
 
-// const functions = require("firebase-functions");
 const {initializeApp} = require("firebase-admin/app");
-// const {getFirestore, Timestamp} = require("firebase-admin/firestore");
-
 initializeApp();
 
-// const db = getFirestore();
 const {functions, db, Timestamp} = require("./db");
 
 const {getUsername} = require("./src/getUsername");
@@ -21,9 +17,6 @@ const {sendInvitation} = require("./src/sendInvitation");
 const {withdrawInvitation} = require("./src/withdrawInvitation");
 const {acceptInvitation} = require("./src/acceptInvitation");
 const {wizz} = require("./src/wizz");
-
-/* ===== Constants ===== */
-
 const {COLLECTION_USERS} = require("./src/globals");
 
 /* ===== Triggers ===== */
